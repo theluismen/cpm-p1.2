@@ -132,34 +132,34 @@ int main()
 
     // Matriu dispersa per matriu dispersa -> dona matriu Dispersa
     neleC = 0;
-    for ( j = 0; j < N; j++ )
-        VBcol[j] = VCcol[j] = 0;
+    //for ( j = 0; j < N; j++ )
+    //    VBcol[j] = VCcol[j] = 0;
 
-    int pos;
-    #pragma omp parallel for private(j, k, pos, VBcol, VCcol) schedule(static)
+    #pragma omp parallel for private(k,j) schedule(dynamic)
     for ( i = 0; i < N; i++ )
     {
-        // expandir Columna de B[*][i]
+        double VBcol[N] = {0};   // inicializados
+        double VCcol[N] = {0};
+
+        // expandir columna de B
         for ( k = jBD[i]; k < jBD[i + 1]; k++ )
             VBcol[BD[k].i] = BD[k].v;
 
-        // Calcul de tota una columna de C
+        // cálculo
         for ( k = 0; k < ND; k++ )
             VCcol[AD[k].i] += AD[k].v * VBcol[AD[k].j];
 
+        // compresión (MEJOR: un solo critical por columna)
+        #pragma omp critical
         for ( j = 0; j < N; j++ )
         {
-            // neteja vector de B[*][i]
-            VBcol[j] = 0;
-
-            // Compressio de C
             if ( VCcol[j] )
             {
-                #pragma omp atomic capture
-                pos = neleC++;
-                CD[pos].i = j;
-                CD[pos].j = i;
-                CD[pos].v = VCcol[j];
+                CD[neleC].i = j;
+                CD[neleC].j = i;
+                CD[neleC].v = VCcol[j];
+                VCcol[j] = 0;
+                neleC++;
             }
         }
     }

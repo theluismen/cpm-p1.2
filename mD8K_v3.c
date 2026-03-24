@@ -49,14 +49,9 @@ int main()
     int i, j, k, neleC;
     double t;
 
-    t = omp_get_wtime();
-
     bzero(C, sizeof(int) * (N * N));
     bzero(C1, sizeof(int) * (N * N));
     bzero(C2, sizeof(int) * (N * N));
-
-    printf("%f\n", omp_get_wtime() - t);
-    t = omp_get_wtime();
 
     for ( k = 0; k < ND; k++ )
     {
@@ -72,12 +67,8 @@ int main()
         }
         A[AD[k].i][AD[k].j] = AD[k].v;
     }
-    printf("%f\n", omp_get_wtime() - t);
-    t = omp_get_wtime();
     qsort(AD, ND, sizeof(tmd), cmp_fil); // ordenat per files
 
-    printf("%f\n", omp_get_wtime() - t);
-    t = omp_get_wtime();
     for ( k = 0; k < ND; k++ )
     {
         BD[k].i = rand() % (N - 1);
@@ -93,13 +84,7 @@ int main()
         B[BD[k].i][BD[k].j] = BD[k].v;
     }
 
-    printf("%f\n", omp_get_wtime() - t);
-    t = omp_get_wtime();
-
     qsort(BD, ND, sizeof(tmd), cmp_col); // ordenat per columnes
-
-    printf("%f\n", omp_get_wtime() - t);
-    t = omp_get_wtime();
 
     // calcul dels index de les columnes
     k = 0;
@@ -110,41 +95,49 @@ int main()
         jBD[j] = k;
     }
 
-    printf("%f\n", omp_get_wtime() - t);
-    t = omp_get_wtime();
-
-
     ////Matriu x matriu original (recorregut de C per columnes)
     // for (i=0;i<N;i++)
     //    for (j=0;j<N;j++)
     //        for (k=0;k<N;k++)
     //            C[j][i] += A[j][k] * B[k][i];
 
-    // Matriu dispersa per matriu
-    for ( i = 0; i < N; i++ )
-        for ( k = 0; k < ND; k++ )
-            C1[AD[k].i][i] += AD[k].v * B[AD[k].j][i];
+    t = omp_get_wtime();
+    #pragma omp parallel
+    {
+        int **C1_local = malloc(N * sizeof(int *));
 
+        #pragma omp for
+        for (int k = 0; k < ND; k++) {
+            for (int i = 0; i < N; i++) {
+                C1_local[AD[k].i][i] += AD[k].v * B[AD[k].j][i];
+            }
+        }
+
+        #pragma omp critical
+        {
+            for (int x = 0; x < N; x++)
+                for (int i = 0; i < N; i++)
+                    C1[x][i] += C1_local[x][i];
+        }
+    }
+    
     printf("%f\n", omp_get_wtime() - t);
     t = omp_get_wtime();
 
-    // Matriu dispersa per matriu dispersa
-    for ( j = 0; j < N; j++ )
-        VBcol[j] = 0;
-
+    #pragma omp parallel for private(j,k,VBcol) schedule(static)
     for ( i = 0; i < N; i++ )
     {
-        // expandir Columna de B[*][i]
+        // Matriu dispersa per matriu dispersa
+        for ( j = 0; j < N; j++ )
+            VBcol[j] = 0;
+
+            // expandir Columna de B[*][i]
         for ( k = jBD[i]; k < jBD[i + 1]; k++ )
             VBcol[BD[k].i] = BD[k].v;
 
         // Calcul de tota una columna de C
         for ( k = 0; k < ND; k++ )
             C2[AD[k].i][i] += AD[k].v * VBcol[AD[k].j];
-
-        // neteja vector de B[*][i]
-        for ( j = 0; j < N; j++ )
-            VBcol[j] = 0;
     }
 
     printf("%f\n", omp_get_wtime() - t);
@@ -152,38 +145,61 @@ int main()
 
     // Matriu dispersa per matriu dispersa -> dona matriu Dispersa
     neleC = 0;
-    for ( j = 0; j < N; j++ )
-        VBcol[j] = VCcol[j] = 0;
 
-    for ( i = 0; i < N; i++ )
+    #pragma omp parallel
     {
-        // expandir Columna de B[*][i]
-        for ( k = jBD[i]; k < jBD[i + 1]; k++ )
-            VBcol[BD[k].i] = BD[k].v;
+        int tid = omp_get_thread_num();
+        int *VBcol = (int*) malloc(sizeof(int) * N);
+        int *VCcol = (int*) malloc(sizeof(int) * N);
+        tmd *CD_col = (tmd*) malloc(sizeof(tmd) * N); // máximo N elementos por columna
+        int count = 0;
 
-        // Calcul de tota una columna de C
-        for ( k = 0; k < ND; k++ )
-            VCcol[AD[k].i] += AD[k].v * VBcol[AD[k].j];
+        for (int j = 0; j < N; j++) VBcol[j] = VCcol[j] = 0;
 
-        for ( j = 0; j < N; j++ )
+        #pragma omp for schedule(dynamic)
+        for (int i = 0; i < N; i++)
         {
-            // neteja vector de B[*][i]
-            VBcol[j] = 0;
+            // limpiar VCcol por columna
+            for (int j = 0; j < N; j++) VCcol[j] = 0;
+            count = 0;
 
-            // Compressio de C
-            if ( VCcol[j] )
+            // expandir columna de B
+            for (int k = jBD[i]; k < jBD[i+1]; k++)
+                VBcol[BD[k].i] = BD[k].v;
+
+            // calcular columna de C
+            for (int k = 0; k < ND; k++)
+                VCcol[AD[k].i] += AD[k].v * VBcol[AD[k].j];
+
+            // compresión a CD_col
+            for (int j = 0; j < N; j++)
             {
-                CD[neleC].i = j;
-                CD[neleC].j = i;
-                CD[neleC].v = VCcol[j];
-                VCcol[j] = 0;
+                VBcol[j] = 0;
+                if (VCcol[j] != 0)
+                {
+                    CD_col[count].i = j;
+                    CD_col[count].j = i;
+                    CD_col[count].v = VCcol[j];
+                    count++;
+                    VCcol[j] = 0;
+                }
+            }
+
+            // merge final con critical
+            #pragma omp critical
+            for (int c = 0; c < count; c++)
+            {
+                CD[neleC] = CD_col[c];
                 neleC++;
             }
         }
+
+        free(VBcol);
+        free(VCcol);
+        free(CD_col);
     }
 
     printf("%f\n", omp_get_wtime() - t);
-    t = omp_get_wtime();
 
     // Comprovacio MD x M -> M i MD x MD -> M
     for ( i = 0; i < N; i++ )
@@ -200,10 +216,6 @@ int main()
             printf("Diferencies C1 i CD a i:%d,j:%d,v%d, k:%d, vd:%d\n",
                    CD[k].i, CD[k].j, C1[CD[k].i][CD[k].j], k, CD[k].v);
     }
-
-    printf("%f\n", omp_get_wtime() - t);
-    t = omp_get_wtime();
-
 
     printf("\nNumero elements de la matriu dispersa C %d\n", neleC);
     printf("Suma dels elements de C %lld \n", Suma);
