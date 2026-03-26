@@ -47,7 +47,7 @@ int cmp_col ( const void *pa, const void *pb )
 int main()
 {
     int i, j, k, neleC;
-    double t;
+    double t; // Recuperamos la variable de tiempo del v2
 
     bzero(C, sizeof(int) * (N * N));
     bzero(C1, sizeof(int) * (N * N));
@@ -95,48 +95,45 @@ int main()
         jBD[j] = k;
     }
 
-    ////Matriu x matriu original (recorregut de C per columnes)
-    // for (i=0;i<N;i++)
-    //    for (j=0;j<N;j++)
-    //        for (k=0;k<N;k++)
-    //            C[j][i] += A[j][k] * B[k][i];
-
-    t = omp_get_wtime();
-    // Matriu dispersa per matriu
-    #pragma omp parallel for private(k) schedule(static)
-    for ( i = 0; i < N; i++ )
-        for ( k = 0; k < ND; k++ ) 
-            C1[AD[k].i][i] += AD[k].v * B[AD[k].j][i];
-    
-    printf("%f\n", omp_get_wtime() - t);
-    t = omp_get_wtime();
-
-    #pragma omp parallel for private(j,k,VBcol) schedule(static)
-    for ( i = 0; i < N; i++ )
-    {
-        // Matriu dispersa per matriu dispersa
-        for ( j = 0; j < N; j++ )
-            VBcol[j] = 0;
-
-            // expandir Columna de B[*][i]
-        for ( k = jBD[i]; k < jBD[i + 1]; k++ )
-            VBcol[BD[k].i] = BD[k].v;
-
-        // Calcul de tota una columna de C
-        for ( k = 0; k < ND; k++ )
-            C2[AD[k].i][i] += AD[k].v * VBcol[AD[k].j];
-    }
-
-    printf("%f\n", omp_get_wtime() - t);
-    t = omp_get_wtime();
-
-    // Matriu dispersa per matriu dispersa -> dona matriu Dispersa
     neleC = 0;
-    int count;
-    #pragma omp parallel private(k,j,count,VBcol,VCcol)
+    
+    // Rescatamos variables del v2 para la paralelización
+    int count; 
+    
+    t = omp_get_wtime();
+
+    // ================================================================
+    // ZONA PARALELA OPTIMIZADA (Inspirada en el V2)
+    // ================================================================
+    #pragma omp parallel private(i, j, k, VBcol, VCcol, count)
     {
-        tmd CD_col[N];
-        
+        // Rescatamos el array local del v2
+        tmd CD_col[N]; 
+
+        // 1. Matriu dispersa per matriu -> M
+        #pragma omp for schedule(static) nowait
+        for ( i = 0; i < N; i++ )
+        {
+            for ( k = 0; k < ND; k++ )
+                C1[AD[k].i][i] += AD[k].v * B[AD[k].j][i];
+        }
+
+        // 2. Matriu dispersa per matriu dispersa -> M
+        #pragma omp for schedule(static) nowait
+        for ( i = 0; i < N; i++ )
+        {
+            for ( j = 0; j < N; j++ )
+                VBcol[j] = 0;
+
+            for ( k = jBD[i]; k < jBD[i + 1]; k++ )
+                VBcol[BD[k].i] = BD[k].v;
+
+            for ( k = 0; k < ND; k++ )
+                C2[AD[k].i][i] += AD[k].v * VBcol[AD[k].j];
+        }
+
+        // 3. Matriu dispersa per matriu dispersa -> MD
+        // Mantenemos el dynamic del v2 aquí porque con el buffer funciona mejor
         #pragma omp for schedule(dynamic)
         for ( i = 0; i < N; i++ )
         {
@@ -157,25 +154,33 @@ int main()
                 // neteja vector de B[*][i]
                 VBcol[j] = 0;
 
-                // Compressio de C
+                // Compressio de C en el buffer local (como en el v2)
                 if ( VCcol[j] )
                 {
-                    tmd elem = {j,i,VCcol[j]};
+                    tmd elem = {j, i, VCcol[j]};
                     CD_col[count] = elem;
                     count++;
                     VCcol[j] = 0;
                 }
             }
             
-            #pragma omp critical
-            for ( int c = 0; c < count; c++ ) {
-                CD[neleC] = CD_col[c];
-                neleC++;
+            // Bolcat masivo con atomic capture para máximo rendimiento
+            // Esto es incluso mejor que el 'critical' del v2
+            if (count > 0) {
+                int start_idx;
+                #pragma omp atomic capture
+                {
+                    start_idx = neleC;
+                    neleC += count;
+                }
+                for ( int c = 0; c < count; c++ ) {
+                    CD[start_idx + c] = CD_col[c];
+                }
             }
         }
-    }
+    } // FIN ZONA PARALELA
 
-    printf("%f\n", omp_get_wtime() - t);
+    printf("Tiempo de calculo: %f segundos\n", omp_get_wtime() - t);
 
     // Comprovacio MD x M -> M i MD x MD -> M
     for ( i = 0; i < N; i++ )
