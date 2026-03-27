@@ -47,7 +47,6 @@ int cmp_col ( const void *pa, const void *pb )
 int main()
 {
     int i, j, k, neleC;
-    double t;
 
     bzero(C, sizeof(int) * (N * N));
     bzero(C1, sizeof(int) * (N * N));
@@ -67,7 +66,7 @@ int main()
         }
         A[AD[k].i][AD[k].j] = AD[k].v;
     }
-    qsort(AD, ND, sizeof(tmd), cmp_fil); 
+    qsort(AD, ND, sizeof(tmd), cmp_fil); // ordenat per files
 
     for ( k = 0; k < ND; k++ )
     {
@@ -83,8 +82,10 @@ int main()
         }
         B[BD[k].i][BD[k].j] = BD[k].v;
     }
-    qsort(BD, ND, sizeof(tmd), cmp_col); 
 
+    qsort(BD, ND, sizeof(tmd), cmp_col); // ordenat per columnes
+
+    // calcul dels index de les columnes
     k = 0;
     for ( j = 0; j < N + 1; j++ )
     {
@@ -93,75 +94,76 @@ int main()
         jBD[j] = k;
     }
 
+    ////Matriu x matriu original (recorregut de C per columnes)
+    // for (i=0;i<N;i++)
+    //    for (j=0;j<N;j++)
+    //        for (k=0;k<N;k++)
+    //            C[j][i] += A[j][k] * B[k][i];
+
     neleC = 0;
-    // ================================================================
-    // VERSIÓN ACADÉMICA: 100% Operaciones + Privatización en Caché
-    // ================================================================
     #pragma omp parallel
     {
-        // Variables 100% locales que viven en la Caché ultrarrápida del procesador
         int VB_local[N];
         int VC_local[N];
         tmd CD_col[N];
         int count;
 
-        // ---------------------------------------------------
-        // 1. Matriu dispersa per matriu -> C1
-        // ---------------------------------------------------
+        // Matriu dispersa per matriu
         #pragma omp for schedule(static) nowait
         for ( int i = 0; i < N; i++ )
         {
-            // PREPARACIÓN: Copiamos los datos de RAM a Caché
-            for ( int j = 0; j < N; j++ ) {
+            for ( int j = 0; j < N; j++ )
+            {
                 VB_local[j] = B[j][i];
                 VC_local[j] = 0;
             }
 
-            // CÁLCULO: Fuerza bruta (640.000 ops sin saltarse nada). 
-            // Al estar en Caché, esto vuela y no atasca a los demás hilos.
-            for ( int k = 0; k < ND; k++ ) {
+            for ( int k = 0; k < ND; k++ )
+            {
                 VC_local[AD[k].i] += AD[k].v * VB_local[AD[k].j];
             }
 
-            // VOLCADO: Escribimos en la lenta RAM solo 1 vez por columna
-            for ( int j = 0; j < N; j++ ) {
-                if (VC_local[j]) {
+            for ( int j = 0; j < N; j++ )
+            {
+                if ( VC_local[j] )
+                {
                     C1[j][i] = VC_local[j];
                 }
             }
         }
 
-        // ---------------------------------------------------
-        // 2 y 3. Matriu dispersa per matriu dispersa -> C2 y CD
-        // ---------------------------------------------------
+        // Matriu dispersa per matriu dispersa
+        // Matriu dispersa per matriu dispersa -> dona matriu Dispersa
         #pragma omp for schedule(static)
         for ( int i = 0; i < N; i++ )
         {
-            // Limpieza local
-            for ( int j = 0; j < N; j++ ) {
+            // neteja vector de B[*][i]
+            for ( int j = 0; j < N; j++ )
+            {
                 VB_local[j] = 0;
                 VC_local[j] = 0;
             }
 
-            // PREPARACIÓN: Expandir columna en Caché
-            for ( int k = jBD[i]; k < jBD[i + 1]; k++ ) {
+            // expandir Columna de B[*][i]
+            for ( int k = jBD[i]; k < jBD[i + 1]; k++ )
+            {
                 VB_local[BD[k].i] = BD[k].v;
             }
 
-            // CÁLCULO: Fuerza bruta completa en Caché
-            for ( int k = 0; k < ND; k++ ) {
+            // Calcul de tota una columna de C
+            for ( int k = 0; k < ND; k++ )
+            {
                 VC_local[AD[k].i] += AD[k].v * VB_local[AD[k].j];
             }
 
             count = 0;
-            // VOLCADO Y COMPRESIÓN
             for ( int j = 0; j < N; j++ )
             {
+                // Compressio de C
                 if ( VC_local[j] )
                 {
-                    C2[j][i] = VC_local[j]; // Matriz normal
+                    C2[j][i] = VC_local[j];
                     
-                    // Buffer disperso
                     CD_col[count].i = j;
                     CD_col[count].j = i;
                     CD_col[count].v = VC_local[j];
@@ -169,21 +171,21 @@ int main()
                 }
             }
 
-            // Atomic Capture para guardado global sin bloqueos masivos
-            if (count > 0) {
+            if ( count > 0 )
+            {
                 int start_idx;
                 #pragma omp atomic capture
                 {
                     start_idx = neleC;
                     neleC += count;
                 }
-                for ( int c = 0; c < count; c++ ) {
+                for ( int c = 0; c < count; c++ )
+                {
                     CD[start_idx + c] = CD_col[c];
                 }
             }
         }
-    } // FIN ZONA PARALELA
-
+    }
 
     // Comprovacio MD x M -> M i MD x MD -> M
     for ( i = 0; i < N; i++ )
