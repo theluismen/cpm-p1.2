@@ -94,12 +94,6 @@ int main()
         jBD[j] = k;
     }
 
-    ////Matriu x matriu original (recorregut de C per columnes)
-    // for (i=0;i<N;i++)
-    //    for (j=0;j<N;j++)
-    //        for (k=0;k<N;k++)
-    //            C[j][i] += A[j][k] * B[k][i];
-
     neleC = 0;
     #pragma omp parallel
     {
@@ -108,7 +102,7 @@ int main()
         tmd CD_col[N];
         int count;
 
-        // Matriu dispersa per matriu
+        // 1. Matriu dispersa per matriu
         #pragma omp for schedule(static) nowait
         for ( int i = 0; i < N; i++ )
         {
@@ -132,60 +126,63 @@ int main()
             }
         }
 
-        // Matriu dispersa per matriu dispersa
-        // Matriu dispersa per matriu dispersa -> dona matriu Dispersa
+        // 2. Matriu dispersa per matriu dispersa -> M (Extraído del v2)
+        #pragma omp for schedule(static) nowait
+        for ( int i = 0; i < N; i++ )
+        {
+            for ( int j = 0; j < N; j++ )
+                VB_local[j] = 0;
+
+            for ( int k = jBD[i]; k < jBD[i + 1]; k++ )
+                VB_local[BD[k].i] = BD[k].v;
+
+            for ( int k = 0; k < ND; k++ )
+                C2[AD[k].i][i] += AD[k].v * VB_local[AD[k].j];
+        }
+
+        // 3. Matriu dispersa per matriu dispersa -> MD (Extraído del v2)
         #pragma omp for schedule(static)
         for ( int i = 0; i < N; i++ )
         {
-            // neteja vector de B[*][i]
             for ( int j = 0; j < N; j++ )
-            {
-                VB_local[j] = 0;
-                VC_local[j] = 0;
-            }
+                VB_local[j] = VC_local[j] = 0;
 
             // expandir Columna de B[*][i]
             for ( int k = jBD[i]; k < jBD[i + 1]; k++ )
-            {
                 VB_local[BD[k].i] = BD[k].v;
-            }
 
             // Calcul de tota una columna de C
             for ( int k = 0; k < ND; k++ )
-            {
                 VC_local[AD[k].i] += AD[k].v * VB_local[AD[k].j];
-            }
 
             count = 0;
             for ( int j = 0; j < N; j++ )
             {
-                // Compressio de C
+                // neteja vector de B[*][i]
+                VB_local[j] = 0;
+
+                // Compressio de C en el buffer local
                 if ( VC_local[j] )
                 {
-                    C2[j][i] = VC_local[j];
-                    
                     CD_col[count].i = j;
                     CD_col[count].j = i;
                     CD_col[count].v = VC_local[j];
                     count++;
+                    VC_local[j] = 0;
                 }
             }
-
-            if ( count > 0 )
+            
+            int start_idx;
+            #pragma omp atomic capture
             {
-                int start_idx;
-                #pragma omp atomic capture
-                {
-                    start_idx = neleC;
-                    neleC += count;
-                }
-                for ( int c = 0; c < count; c++ )
-                {
-                    CD[start_idx + c] = CD_col[c];
-                }
+                start_idx = neleC;
+                neleC += count;
+            }
+            for ( int c = 0; c < count; c++ ) {
+                CD[start_idx + c] = CD_col[c];
             }
         }
-    }
+    } // FIN ZONA PARALELA
 
     // Comprovacio MD x M -> M i MD x MD -> M
     for ( i = 0; i < N; i++ )
