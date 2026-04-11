@@ -12,7 +12,8 @@ typedef struct {
     int i, j, v;
 } tmd;
 
-int A[N][N], B[N][N], C[N][N], C1[N][N], C2[N][N];
+// int C[N][N];
+int A[N][N], B[N][N], C1[N][N], C2[N][N];
 int jBD[N + 1];
 tmd AD[ND], BD[ND], CD[N * N];
 
@@ -48,7 +49,7 @@ int main()
 {
     int i, j, k, neleC;
 
-    bzero(C, sizeof(int) * (N * N));
+    // bzero(C, sizeof(int) * (N * N));
     bzero(C1, sizeof(int) * (N * N));
     bzero(C2, sizeof(int) * (N * N));
 
@@ -102,7 +103,7 @@ int main()
         tmd CD_col[N];
         int count;
 
-        // 1. Matriu dispersa per matriu
+        // Cálculo 1 -> Matriz dispersa por matriz densa -> Matriz dispersa 
         #pragma omp for schedule(static) nowait
         for ( int i = 0; i < N; i++ )
         {
@@ -126,7 +127,7 @@ int main()
             }
         }
 
-        // 2. Matriu dispersa per matriu dispersa -> M (Extraído del v2)
+        // Cálculo 2 -> Matriz densa por matriz densa -> Matriz dispersa 
         #pragma omp for schedule(static) nowait
         for ( int i = 0; i < N; i++ )
         {
@@ -140,7 +141,7 @@ int main()
                 C2[AD[k].i][i] += AD[k].v * VB_local[AD[k].j];
         }
 
-        // 3. Matriu dispersa per matriu dispersa -> MD (Extraído del v2)
+        // Cálculo 3 -> Matriz densa por matriz densa -> Matriz densa
         #pragma omp for schedule(static)
         for ( int i = 0; i < N; i++ )
         {
@@ -182,7 +183,7 @@ int main()
                 CD[start_idx + c] = CD_col[c];
             }
         }
-    } // FIN ZONA PARALELA
+    }
 
     // Comprovacio MD x M -> M i MD x MD -> M
     for ( i = 0; i < N; i++ )
