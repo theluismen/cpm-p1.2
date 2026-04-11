@@ -103,7 +103,7 @@ int main()
         tmd CD_col[N];
         int count;
 
-        // Cálculo 1 -> Matriz dispersa por matriz densa -> Matriz dispersa 
+        // Cálculo 1 -> Matriz dispersa por matriz densa -> Matriz dispersa
         #pragma omp for schedule(static) nowait
         for ( int i = 0; i < N; i++ )
         {
@@ -127,7 +127,7 @@ int main()
             }
         }
 
-        // Cálculo 2 -> Matriz densa por matriz densa -> Matriz dispersa 
+        // Cálculo 2 -> Matriz densa por matriz densa -> Matriz dispersa
         #pragma omp for schedule(static) nowait
         for ( int i = 0; i < N; i++ )
         {
@@ -142,7 +142,7 @@ int main()
         }
 
         // Cálculo 3 -> Matriz densa por matriz densa -> Matriz densa
-        #pragma omp for schedule(static)
+        #pragma omp for schedule(dynamic)
         for ( int i = 0; i < N; i++ )
         {
             for ( int j = 0; j < N; j++ )
@@ -172,7 +172,7 @@ int main()
                     VC_local[j] = 0;
                 }
             }
-            
+
             int start_idx;
             #pragma omp atomic capture
             {
